@@ -5,7 +5,7 @@ A local plugin for Moodle that injects a dynamic "Review" button into the Lesson
 ## Features
 * Automatically injects a review button on completed lessons.
 * Supports multiple lesson attempts, generating distinct review buttons for each completed attempt.
-* Intelligently hides review buttons while a student is in the middle of an active attempt.
+* Hides review buttons while a student is in the middle of an active attempt.
 * Reconstructs the exact chronological path taken through branching lessons.
 * Review button is generated if the Lesson is set to "Allow student review" and any set Activity Completion settings are met.
 

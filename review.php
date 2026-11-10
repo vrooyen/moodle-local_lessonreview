@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -18,10 +19,9 @@
  * Displays the historical attempts and answers for a specific lesson.
  *
  * @package    local_lessonreview
- * @copyright  2026 Marinda Faasen
+ * @copyright  2026 Marinda Faasen <faasenmarinda@gmail.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
 require_once('../../config.php');
 
 $cmid = required_param('cmid', PARAM_INT);
@@ -33,10 +33,11 @@ $lesson = $DB->get_record('lesson', ['id' => $cm->instance], '*', MUST_EXIST);
 
 require_login($course, true, $cm);
 $context = context_module::instance($cm->id);
+require_capability('mod/lesson:view', $context);
 
 // 1. "Allow student review" must be set to 'Yes'
 if (empty($lesson->review)) {
-    throw new \moodle_exception('Reviewing is not permitted for this lesson. Please check the lesson settings.');
+    throw new \moodle_exception('reviewnotpermitted', 'local_lessonreview');
 }
 
 // 2. Evaluate Moodle's completion conditions
@@ -52,23 +53,27 @@ if ($completion->is_enabled($cm)) {
 }
 
 if (!$iscompleted) {
-    throw new \moodle_exception('You must complete all required conditions for this lesson before accessing the review.');
+    throw new \moodle_exception('requiredconditions', 'local_lessonreview');
 }
 
 $PAGE->set_url('/local/lessonreview/review.php', ['cmid' => $cmid, 'retry' => $retry]);
-$PAGE->set_title(format_string($lesson->name) . ' - Review');
+$PAGE->set_title(get_string('reviewpagetitle', 'local_lessonreview', format_string($lesson->name)));
 $PAGE->set_heading($course->fullname);
 $PAGE->set_context($context);
 
 echo $OUTPUT->header();
-echo $OUTPUT->heading('Review: ' . format_string($lesson->name) . ' (Attempt ' . ($retry + 1) . ')');
+$headingdata = new \stdClass();
+$headingdata->lessonname = format_string($lesson->name);
+$headingdata->attempt = $retry + 1;
+
+echo $OUTPUT->heading(get_string('reviewheading', 'local_lessonreview', $headingdata));
 
 // 1. Fetch all pages and answers into memory for fast mapping
 $pages = $DB->get_records('lesson_pages', ['lessonid' => $lesson->id]);
 $answers = $DB->get_records('lesson_answers', ['lessonid' => $lesson->id]);
 
 $concat_attempt = $DB->sql_concat("'a_'", 'a.id');
-$concat_branch  = $DB->sql_concat("'b_'", 'b.id');
+$concat_branch = $DB->sql_concat("'b_'", 'b.id');
 
 $sql = "
     SELECT $concat_attempt AS uniqueid, 'attempt' AS eventtype, a.id, a.pageid, a.timeseen, a.useranswer, a.correct, a.answerid
@@ -97,64 +102,91 @@ $sql = "
 $events = $DB->get_records_sql($sql, [
     'lessonid1' => $lesson->id, 'userid1' => $USER->id, 'retry1' => $retry,
     'lessonid2' => $lesson->id, 'userid2' => $USER->id, 'retry2' => $retry
-]);
+        ]);
 
 if ($events) {
     foreach ($events as $event) {
         if (!isset($pages[$event->pageid])) {
             continue; // Safety check in case a page was deleted
         }
-        
+
         $page = $pages[$event->pageid];
-        
+
         echo html_writer::start_tag('div', ['class' => 'card mb-4']);
         echo html_writer::start_tag('div', ['class' => 'card-header']);
         echo html_writer::tag('h3', format_string($page->title), ['class' => 'h5 mb-0']);
         echo html_writer::end_tag('div');
-        
+
         echo html_writer::start_tag('div', ['class' => 'card-body']);
-        
+
         // Render the core page content (applies to both questions and content pages)
-    // Rewrite placeholders to actual URLs for embedded videos and images
-$rewrittencontents = file_rewrite_pluginfile_urls(
-    $page->contents,
-    'pluginfile.php',
-    $context->id,
-    'mod_lesson',
-    'page_contents',
-    $page->id
-);
+        // Rewrite placeholders to actual URLs for embedded videos and images
+        $rewrittencontents = file_rewrite_pluginfile_urls(
+                $page->contents,
+                'pluginfile.php',
+                $context->id,
+                'mod_lesson',
+                'page_contents',
+                $page->id
+        );
 
 // Format the rewritten text using the page's specific format
-echo html_writer::tag('div', format_text($rewrittencontents, $page->contentsformat), ['class' => 'mb-3']);
+        echo html_writer::tag('div', format_text($rewrittencontents, $page->contentsformat), ['class' => 'mb-3']);
         // 3. Skip evaluation logic if it is a Content Page (qtype 20)
         if ($event->eventtype === 'branch' || $page->qtype == 20) {
             // It's a content page, do nothing else.
         } else {
             // It is a Question page, process the answer
             $useranswertext = '';
-            
-       // Short Answer (1) and Numerical (8) store raw text
+
+            // Short Answer (1) and Numerical (8) store raw text
             if (in_array($page->qtype, [1, 8])) {
                 $useranswertext = s($event->useranswer);
-            } 
+            }
+
             // Essay (10) stores a serialized PHP object
             elseif ($page->qtype == 10) {
-                $essayinfo = @unserialize($event->useranswer);
-                
-                if ($essayinfo !== false && isset($essayinfo->answer)) {
-                    // 1. Extract and format the student's essay text
-                    $useranswertext = format_text($essayinfo->answer, $essayinfo->answerformat);
-                    
-                    // 2. If it has been graded, append the teacher's feedback
-                    if (!empty($essayinfo->graded) && !empty($essayinfo->response)) {
-                        $useranswertext .= html_writer::start_tag('div', ['class' => 'alert alert-info mt-3 p-2']);
-                        $useranswertext .= html_writer::tag('strong', 'Instructor Feedback:') . '<br>';
-                        $useranswertext .= format_text($essayinfo->response, $essayinfo->responseformat);
-                        $useranswertext .= html_writer::end_tag('div');
+                $essayinfo = @unserialize($event->useranswer, ['allowed_classes' => ['stdClass']]);
+
+                if (isset($essayinfo)) {
+
+                    // Process and display the student's answer
+                    if (isset($essayinfo->answer)) {
+
+                        // 1. Rewrite URLs for the student's answer area
+                        $answerformat = isset($essayinfo->answerformat) ? $essayinfo->answerformat : FORMAT_MOODLE;
+                        $answer = file_rewrite_pluginfile_urls($essayinfo->answer, 'pluginfile.php', $context->id, 'mod_lesson', 'essay_answers', $event->id);
+
+                        echo html_writer::tag('h6', get_string('youranswer', 'local_lessonreview'));
+                        // 2. Format the rewritten text
+                        echo $OUTPUT->box(format_text($answer, $answerformat, ['context' => $context]), 'generalbox');
                     }
-                } else {
-                    $useranswertext = '<em>Error parsing essay data.</em>';
+
+                    if (empty($essayinfo->graded)) {
+                        // Not graded yet
+                        echo $OUTPUT->notification(get_string('essaynotgraded', 'local_lessonreview'), 'info');
+                    } else {
+                        //Get maximum grade
+                        $sql = 'SELECT score FROM {lesson_answers} WHERE pageid = ' . $event->pageid;
+                        if ($score = $DB->get_record_sql($sql)) {
+                            $maxscore = $score->score;
+                        }
+
+
+                        // Process and display the teacher's feedback
+                        if (!empty($essayinfo->response)) {
+                            echo $OUTPUT->heading(get_string('teacherfeedback', 'local_lessonreview'), 6);
+
+                            // 1. Rewrite URLs for the teacher's response area
+                            $responseformat = isset($essayinfo->responseformat) ? $essayinfo->responseformat : FORMAT_MOODLE;
+                            $response = file_rewrite_pluginfile_urls($essayinfo->response, 'pluginfile.php', $context->id, 'mod_lesson', 'essay_responses', $event->id);
+
+                            echo $OUTPUT->box(format_text($response, $responseformat, ['context' => $context]), 'generalbox');
+                            // Graded! Show the score
+                            echo $OUTPUT->notification(get_string('essaygraded', 'local_lessonreview', $essayinfo->score) . '  ' .
+                                    get_string('maxgrade', 'local_lessonreview', $maxscore), 'success');
+                        }
+                    }
                 }
             }
             // Multichoice Multi-select (3 with option 1) stores comma-separated IDs
@@ -167,58 +199,62 @@ echo html_writer::tag('div', format_text($rewrittencontents, $page->contentsform
                     }
                 }
                 $useranswertext = implode('<br>', $texts);
-            } 
+            }
             // Matching (5) stores comma-separated IDs in the response column
-      // Matching (5) stores comma-separated IDs mapped by chronological order
+            // Matching (5) stores comma-separated IDs mapped by chronological order
             elseif ($page->qtype == 5) {
                 $selectedvals = explode(',', $event->useranswer);
                 $texts = [];
-                
+
                 // Get all answers for this page to reconstruct the Question -> Match pairs
                 $pageanswers = $DB->get_records('lesson_answers', ['pageid' => $page->id], 'id ASC');
-                
+
                 // In Lesson matching, the first 2 records are generic Correct/Wrong jumps. 
                 // The actual pairs start at the 3rd record.
                 $matchingpairs = array_slice($pageanswers, 2);
-                
+
                 $i = 0;
                 foreach ($matchingpairs as $pair) {
                     // Skip extra wrong answers (distractors) which have no question text
                     if (trim($pair->answer) === '') {
                         continue;
                     }
-                    
+
                     $val = isset($selectedvals[$i]) ? trim($selectedvals[$i]) : '';
                     $selectedtext = $val; // Fallback to raw value
-                    
                     // If the stored value is an ID, fetch the matching response text
                     if (is_numeric($val) && isset($answers[$val])) {
                         $selectedtext = $answers[$val]->response;
                     }
-                    
+
                     $texts[] = '• <strong>' . format_string($pair->answer) . ':</strong> ' . format_string($selectedtext);
                     $i++;
                 }
                 $useranswertext = implode('<br>', $texts);
-            } 
+            }
             // Standard True/False or Single Choice
             else {
                 if (!empty($event->answerid) && isset($answers[$event->answerid])) {
                     $useranswertext = format_string($answers[$event->answerid]->answer);
                 }
             }
-            
+
             if (empty($useranswertext)) {
-                $useranswertext = '<em>No answer recorded</em>';
+                $useranswertext = get_string('useranswertext', 'local_lessonreview');
             }
-            
-            $statusclass = $event->correct ? 'alert-success' : 'alert-danger';
-            $statustext = $event->correct ? 'Correct' : 'Incorrect';
-            
-            echo html_writer::tag('p', '<strong>Your Answer:</strong><br>' . $useranswertext);
-            echo html_writer::tag('div', $statustext, ['class' => "alert $statusclass py-1 px-2 d-inline-block"]);
+            if ($page->qtype != 10) {
+
+
+                $statusclass = $event->correct ? 'alert-success' : 'alert-danger';
+                $statustext = $event->correct ? get_string('correct', 'local_lessonreview') : get_string('incorrect', 'local_lessonreview');
+
+                echo html_writer::tag('h6', get_string('youranswer', 'local_lessonreview'));
+
+                echo html_writer::tag('p', $useranswertext);
+                echo html_writer::tag('div', $statustext, ['class' => "alert $statusclass py-1 px-2 d-inline-block"]);
+            }
         }
-        
+
         echo html_writer::end_tag('div'); // close card-body
         echo html_writer::end_tag('div'); // close card
     }
@@ -227,32 +263,40 @@ echo html_writer::tag('div', format_text($rewrittencontents, $page->contentsform
     // Edge Case: The user triggered completion (e.g., via 'View' only) but clicked no buttons, 
     // so no database records were created. We know they at least saw the very first page.
     $firstpage = $DB->get_record('lesson_pages', ['lessonid' => $lesson->id, 'prevpageid' => 0]);
-    
+
     if ($firstpage) {
-        echo html_writer::tag('div', '<strong>Note:</strong> You viewed this lesson but did not navigate through any internal buttons, so only the introductory page was recorded.', ['class' => 'alert alert-warning mt-3 mb-4']);
-        
+        echo html_writer::tag('div', get_string('firstpageviewed', 'local_lessonreview'), ['class' => 'alert alert-warning mt-3 mb-4']);
+
         echo html_writer::start_tag('div', ['class' => 'card mb-4']);
         echo html_writer::start_tag('div', ['class' => 'card-header']);
         echo html_writer::tag('h3', format_string($firstpage->title), ['class' => 'h5 mb-0']);
         echo html_writer::end_tag('div');
-        
+
         echo html_writer::start_tag('div', ['class' => 'card-body']);
-        
+
         $rewrittencontents = file_rewrite_pluginfile_urls(
-            $firstpage->contents,
-            'pluginfile.php',
-            $context->id,
-            'mod_lesson',
-            'page_contents',
-            $firstpage->id
+                $firstpage->contents,
+                'pluginfile.php',
+                $context->id,
+                'mod_lesson',
+                'page_contents',
+                $firstpage->id
         );
         echo html_writer::tag('div', format_text($rewrittencontents, $firstpage->contentsformat), ['class' => 'mb-3']);
-        
+
         echo html_writer::end_tag('div');
         echo html_writer::end_tag('div');
     } else {
-        echo html_writer::tag('p', 'No attempt data found for this lesson.');
+        echo html_writer::tag('p', get_strign('noattempts', 'local_lessonreview'));
     }
 }
+// Construct the URL back to the main lesson view page
+$returnurl = new \moodle_url('/mod/lesson/view.php', ['id' => $cm->id]);
+
+// Output a centered 'Finish review' button using a clean styled link
+echo html_writer::div(
+    html_writer::link($returnurl, get_string('finishreview', 'local_lessonreview'), ['class' => 'btn btn-primary']),
+    'text-center mt-4 mb-4'
+);
 
 echo $OUTPUT->footer();

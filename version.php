@@ -18,13 +18,13 @@
  * Version details.
  *
  * @package    local_lessonreview
- * @copyright  2026 Marinda Faasen
+ * @copyright  2026 Marinda Faasen <faasenmarinda@gmail.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die;
 
-$plugin->version  = 2026101602;
+$plugin->version  = 2026111000;
 $plugin->release   = '1.0';
 $plugin->maturity  = MATURITY_STABLE;
 $plugin->requires = 2026042000;

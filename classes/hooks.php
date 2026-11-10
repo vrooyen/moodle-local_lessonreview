@@ -18,7 +18,7 @@
  * Version details.
  *
  * @package    local_lessonreview
- * @copyright  2026 Marinda Faasen
+ * @copyright  2026 Marinda Faasen <faasenmarinda@gmail.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -103,11 +103,15 @@ class hooks {
             // 3. Check for an active, unfinished attempt
             $max_retry = max($retries);
             
-            // If the highest retry index is >= the number of completed attempts, they are busy taking it!
-            if ($max_retry >= $completed_count) {
-                $PAGE->requires->js_amd_inline("console.info('Lesson Review: User is currently busy with Attempt " . ($max_retry + 1) . ". Hiding review buttons to prevent distraction.');");
-                return;
-            }
+     // If the highest retry index is >= the number of completed attempts, they are busy taking it!
+        if ($max_retry >= $completed_count) {
+            $attemptnum = $max_retry + 1;
+            $logmessage = get_string('reviewactiveattempt', 'local_lessonreview', $attemptnum);
+            $PAGE->requires->js_amd_inline("console.info(" . json_encode($logmessage) . ");");
+            return;
+        }
+            
+         
 
             $string_review = get_string('review', 'local_lessonreview');
             $buttons_js = "";
