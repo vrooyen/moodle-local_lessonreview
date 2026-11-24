@@ -287,7 +287,7 @@ if ($events) {
         echo html_writer::end_tag('div');
         echo html_writer::end_tag('div');
     } else {
-        echo html_writer::tag('p', get_strign('noattempts', 'local_lessonreview'));
+        echo html_writer::tag('p', get_string('noattempts', 'local_lessonreview'));
     }
 }
 // Construct the URL back to the main lesson view page
